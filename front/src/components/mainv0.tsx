@@ -4,10 +4,9 @@ import React, { useState, useEffect } from "react"; // Ensure React is imported
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Textarea } from "@/components/ui/textarea";
-import { hash as starknetHash } from "starknet";
 import AlertDialog from './AlertDialog';
 import Image from 'next/image';
-import { fetchDocuments, saveDocument, deleteDocument, fetchDocumentDetails, submitToChain } from '../app/services/documentService'
+import { fetchDocuments, saveDocument, deleteDocument, fetchDocumentDetails, waitForTransaction, ChainRecord } from '../app/services/documentService'
 
 interface FileUploadProps {
   onFileRead: (fileContent: string, fileName: string) => void;
@@ -64,56 +63,53 @@ export function Mainv0() {
       .catch(error => console.error("Error fetching documents:", error));
   }, []);
 
+  // Report a chain write as pending, then as confirmed or rejected once the
+  // transaction's outcome is known.
+  const reportChain = async (label: string, chain: ChainRecord) => {
+    if (chain.status === 'failed' || !chain.txHash) {
+      setTransactionHash('');
+      setAlertMessage(`${label} in the database, but the Starknet transaction was not sent: ${chain.error ?? 'unknown error'}`);
+      return;
+    }
+    const txHash = chain.txHash;
+    setTransactionHash(txHash);
+    setAlertMessage(`${label}. Starknet transaction submitted, waiting for confirmation: ${txHash}`);
+    const outcome = await waitForTransaction(txHash);
+    setTransactionHash(txHash);
+    if (outcome === 'confirmed') {
+      setAlertMessage(`${label}. Starknet transaction confirmed: ${txHash}`);
+    } else if (outcome === 'rejected') {
+      setAlertMessage(`${label} in the database, but the Starknet transaction was rejected: ${txHash}`);
+    } else {
+      setAlertMessage(`${label}. Starknet transaction still pending, check it on Voyager: ${txHash}`);
+    }
+  };
+
+  const showError = (error: unknown) => {
+    setTransactionHash('');
+    setAlertMessage(error instanceof Error ? `Error: ${error.message}` : 'An unknown error occurred');
+  };
+
   const handleSave = async () => {
     try {
-      const textHash = starknetHash.starknetKeccak(text).toString();
-      const prevHash = currentDocId !== '' ? documents.find(doc => doc._id === currentDocId)?.hash : null;
-
-      const response = await saveDocument(currentDocId != "" ? currentDocId : undefined, { text, name, hash: textHash });
-
-      if (response.ok) {
-        const txHash = currentDocId !== ''
-          ? await submitToChain({ action: 'update', path: name, prevContentHash: prevHash!, contentHash: textHash })
-          : await submitToChain({ action: 'create', path: name, contentHash: textHash });
-
-        setAlertMessage(`File ${currentDocId !== '' ? 'updated' : 'created'}: ${JSON.stringify(txHash)}`);
-        setTransactionHash(txHash);
-        fetchDocuments().then(setDocuments);
-      } else {
-        setAlertMessage(`Error: Failed to save text ${response.statusText}`);
-      }
+      const isUpdate = currentDocId !== '';
+      const result = await saveDocument(isUpdate ? currentDocId : undefined, { text, name });
+      if (!isUpdate && result.id) setCurrentDocId(result.id);
+      fetchDocuments().then(setDocuments).catch(showError);
+      await reportChain(`File ${isUpdate ? 'updated' : 'created'}`, result.chain);
     } catch (error) {
-      if (error instanceof Error) {
-        setAlertMessage(`Error: ${error.message}`);
-      } else {
-        setAlertMessage('An unknown error occurred');
-      }
+      showError(error);
     }
   };
 
   const handleDelete = async (id: string) => {
     try {
-      const docToDelete = documents.find((doc) => doc._id === id);
-      const textHash = docToDelete ? starknetHash.starknetKeccak(docToDelete.text).toString() : undefined;
-
-      const response = await deleteDocument(id);
-
-      if (response.ok) {
-        setDocuments((prevDocuments) => prevDocuments.filter((doc) => doc._id !== id));
-        if (textHash) {
-          const txHash = await submitToChain({ action: 'remove', contentHash: textHash });
-          setAlertMessage(`File deleted: ${JSON.stringify(txHash)}`);
-          setTransactionHash(txHash);
-        }
-      } else {
-        setAlertMessage(`Error: Failed to delete document ${response.statusText}`);
-      }
+      const result = await deleteDocument(id);
+      setDocuments((prevDocuments) => prevDocuments.filter((doc) => doc._id !== id));
+      if (id === currentDocId) setCurrentDocId('');
+      await reportChain('File deleted', result.chain);
     } catch (error) {
-      if (error instanceof Error) {
-        setAlertMessage(`Error: ${error.message}`);
-      } else {
-        setAlertMessage('An unknown error occurred');
-      }
+      showError(error);
     }
   };
 
