@@ -26,7 +26,7 @@ async function initializeContract() {
     throw new ContractUnavailableError('PRIVATE_KEY environment variable is not set');
   }
   const provider = getProvider();
-  const account = new Account(provider, account0Address, privateKey);
+  const account = new Account({ provider, address: account0Address, signer: privateKey });
   let abi;
   try {
     ({ abi } = await provider.getClassAt(contractAddress));
@@ -36,9 +36,7 @@ async function initializeContract() {
   if (!abi) {
     throw new ContractUnavailableError('No ABI found for contract');
   }
-  const contract = new Contract(abi, contractAddress, provider);
-  contract.connect(account);
-  return contract;
+  return new Contract({ abi, address: contractAddress, providerOrAccount: account });
 }
 
 export function getContract() {
@@ -62,30 +60,27 @@ export function hashText(text) {
 
 export async function createFile(path, contentHash) {
   const contract = await getContract();
-  const myCall = contract.populate('create_file', [path, contentHash]);
-  return contract.create_file(myCall.calldata);
+  return contract.invoke('create_file', [path, contentHash]);
 }
 
 export async function updateFile(path, prevContentHash, newContentHash) {
   const contract = await getContract();
-  const myCall = contract.populate('update', [path, prevContentHash, newContentHash]);
-  return contract.update(myCall.calldata);
+  return contract.invoke('update', [path, prevContentHash, newContentHash]);
 }
 
 export async function removeFile(contentHash) {
   const contract = await getContract();
-  const myCall = contract.populate('remove', [contentHash]);
-  return contract.remove(myCall.calldata);
+  return contract.invoke('remove', [contentHash]);
 }
 
 export async function getFileCount() {
   const contract = await getContract();
-  return contract.get_file_count();
+  return contract.call('get_file_count');
 }
 
 export async function getFile(contentHash) {
   const contract = await getContract();
-  return contract.get_file(contentHash);
+  return contract.call('get_file', [contentHash]);
 }
 
 // Maps the node's view of a transaction to 'pending' | 'confirmed' | 'rejected'.

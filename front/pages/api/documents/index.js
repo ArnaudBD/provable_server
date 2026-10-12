@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    if (!requireWritePassword(req, res)) return;
+    if (!(await requireWritePassword(req, res))) return;
     const { text, name } = req.body || {};
     if (typeof text !== 'string' || !text) {
       return sendError(res, 400, 'text is required');

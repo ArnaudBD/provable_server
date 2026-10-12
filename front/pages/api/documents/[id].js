@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
   let updateFields;
   if (req.method === 'PUT' || req.method === 'DELETE') {
-    if (!requireWritePassword(req, res)) return;
+    if (!(await requireWritePassword(req, res))) return;
   }
   if (req.method === 'PUT') {
     const { text, name } = req.body || {};

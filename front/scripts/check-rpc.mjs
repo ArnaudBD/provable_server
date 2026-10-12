@@ -17,8 +17,8 @@ try {
   const provider = new RpcProvider({ nodeUrl });
   console.log('RPC spec version:', await provider.getSpecVersion());
   const { abi } = await provider.getClassAt(contractAddress);
-  const contract = new Contract(abi, contractAddress, provider);
-  console.log('Contract loaded, get_file_count =', (await contract.get_file_count()).toString());
+  const contract = new Contract({ abi, address: contractAddress, providerOrAccount: provider });
+  console.log('Contract loaded, get_file_count =', (await contract.call('get_file_count')).toString());
   console.log('OK');
 } catch (error) {
   console.error('RPC check failed:', error.message);

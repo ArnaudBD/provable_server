@@ -17,6 +17,24 @@ interface Document {
   name: string;
   text: string;
   hash: string;
+  chain?: ChainRecord;
+}
+
+const CHAIN_LABELS: Record<ChainRecord['status'], string> = {
+  pending: 'pending on Starknet',
+  confirmed: 'on Starknet',
+  rejected: 'rejected by Starknet',
+  failed: 'not on Starknet',
+};
+
+function ChainBadge({ chain }: { chain?: ChainRecord }) {
+  if (!chain || chain.status === 'confirmed') return null;
+  const color = chain.status === 'pending' ? 'text-yellow-500' : 'text-red-500';
+  return (
+    <span className={`ml-2 shrink-0 text-xs ${color}`} title={chain.error ?? CHAIN_LABELS[chain.status]}>
+      {CHAIN_LABELS[chain.status]}
+    </span>
+  );
 }
 
 function FileUpload({ onFileRead }: FileUploadProps) {
@@ -75,6 +93,7 @@ export function Mainv0() {
     setTransactionHash(txHash);
     setAlertMessage(`${label}. Starknet transaction submitted, waiting for confirmation: ${txHash}`);
     const outcome = await waitForTransaction(txHash);
+    fetchDocuments().then(setDocuments).catch(() => {});
     setTransactionHash(txHash);
     if (outcome === 'confirmed') {
       setAlertMessage(`${label}. Starknet transaction confirmed: ${txHash}`);
@@ -112,6 +131,8 @@ export function Mainv0() {
       showError(error);
     }
   };
+
+  const currentDoc = documents.find((doc) => doc._id === currentDocId);
 
   const handleDocumentClick = async (id: string) => {
     try {
@@ -167,6 +188,7 @@ export function Mainv0() {
                 >
                   {doc.name}
                 </a>
+                <ChainBadge chain={doc.chain} />
                 <XIcon
                   className="h-4 w-4 cursor-pointer"
                   onClick={(e) => {
@@ -197,6 +219,9 @@ export function Mainv0() {
           {currentDocId !== '' && (
             <div className="mt-2 text-sm text-gray-5000">
               Document ID: {currentDocId}
+              {currentDoc?.chain && (
+                <span className="ml-2">· {CHAIN_LABELS[currentDoc.chain.status]}{currentDoc.chain.error ? ` (${currentDoc.chain.error})` : ''}</span>
+              )}
             </div>
           )}
         </div>
