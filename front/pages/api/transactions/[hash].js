@@ -1,4 +1,5 @@
 import { getCollection } from '../../../src/lib/mongodb';
+import { outcomeUpdate } from '../../../src/lib/chain';
 import { methodNotAllowed, sendError } from '../../../src/lib/api';
 import { ContractUnavailableError, getTransactionOutcome } from '../../../src/lib/contract';
 
@@ -28,10 +29,10 @@ export default async function handler(req, res) {
   if (outcome.status !== 'pending') {
     try {
       const collection = await getCollection();
-      await collection.updateOne(
-        { 'chain.txHash': hash },
-        { $set: { 'chain.status': outcome.status, 'chain.updatedAt': new Date() } },
-      );
+      const doc = await collection.findOne({ 'chain.txHash': hash, 'chain.status': 'pending' });
+      if (doc) {
+        await collection.updateOne({ _id: doc._id, 'chain.txHash': hash }, { $set: outcomeUpdate(doc, outcome) });
+      }
     } catch (error) {
       // The chain answer is still correct; the stored record catches up on the next check.
       console.error(`Error recording outcome of ${hash}`, error);

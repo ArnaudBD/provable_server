@@ -1,9 +1,9 @@
 import { ObjectId } from 'mongodb';
 import { getCollection } from '../../../src/lib/mongodb';
 import { methodNotAllowed, sendDatabaseError, sendError } from '../../../src/lib/api';
-import { requireWritePassword } from '../../../src/lib/auth';
-import { submitChainWrite } from '../../../src/lib/chain';
-import { hashText, removeFile, updateFile } from '../../../src/lib/contract';
+import { checkWriteRateLimit } from '../../../src/lib/writeLimit';
+import { getOnChainHash, settlePendingWrite, submitChainWrite } from '../../../src/lib/chain';
+import { hashText } from '../../../src/lib/contract';
 import { validateName } from '../../../src/lib/validation';
 
 const ALLOWED_METHODS = ['GET', 'PUT', 'DELETE'];
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
   let updateFields;
   if (req.method === 'PUT' || req.method === 'DELETE') {
-    if (!(await requireWritePassword(req, res))) return;
+    if (!(await checkWriteRateLimit(req, res))) return;
   }
   if (req.method === 'PUT') {
     const { text, name } = req.body || {};
@@ -52,23 +52,35 @@ export default async function handler(req, res) {
       return res.status(200).json(document);
     }
 
+    // Writes derive the next transaction from what the contract holds for this
+    // document (onChainHash), not from the latest saved content, which can be
+    // ahead of the chain after a failed or rejected write.
+    const current = await collection.findOne(filter);
+    if (!current) {
+      return sendError(res, 404, 'Document not found');
+    }
+    const settled = await settlePendingWrite(collection, current);
+    if (!settled) {
+      return sendError(res, 409, 'The previous Starknet transaction for this document is still pending, try again shortly');
+    }
+    const onChainHash = getOnChainHash(settled);
+
     if (req.method === 'PUT') {
-      const previous = await collection.findOneAndUpdate(filter, { $set: updateFields }, { returnDocument: 'before' });
-      if (!previous) {
-        return sendError(res, 404, 'Document not found');
-      }
-      const name = updateFields.name ?? previous.name;
-      const hash = updateFields.hash ?? previous.hash;
-      const chain = await submitChainWrite('update', () => updateFile(name, previous.hash, hash));
+      await collection.updateOne(filter, { $set: { ...updateFields, onChainHash } });
+      const name = updateFields.name ?? settled.name;
+      const hash = updateFields.hash ?? settled.hash;
+      // Nothing confirmed on chain yet (the create failed or was rejected): create it now.
+      const chain = onChainHash === null
+        ? await submitChainWrite('create', 'create_file', [name, hash], hash)
+        : await submitChainWrite('update', 'update', [name, onChainHash, hash], hash);
       await collection.updateOne(filter, { $set: { chain } });
       return res.status(200).json({ message: 'Document updated', chain });
     }
 
-    const deleted = await collection.findOneAndDelete(filter);
-    if (!deleted) {
-      return sendError(res, 404, 'Document not found');
-    }
-    const chain = await submitChainWrite('remove', () => removeFile(deleted.hash));
+    await collection.deleteOne(filter);
+    const chain = onChainHash === null
+      ? { action: 'remove', status: 'skipped', updatedAt: new Date() }
+      : await submitChainWrite('remove', 'remove', [onChainHash], null);
     return res.status(200).json({ message: 'Document deleted', chain });
   } catch (error) {
     return sendDatabaseError(res, error, `Error handling ${req.method} /api/documents/${id}`);

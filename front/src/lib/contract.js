@@ -1,6 +1,6 @@
 // Server-only: this module reads PRIVATE_KEY and signs transactions. Import it
 // from API routes only, never from client components.
-import { RpcProvider, Contract, Account, hash } from 'starknet';
+import { RpcProvider, RpcError, Contract, Account, hash } from 'starknet';
 
 export const contractAddress = '0x04b306b10d8be501edc8ba8de2b318b103398b61b3c6aa6570cc891533088b72';
 
@@ -8,21 +8,26 @@ export class ContractUnavailableError extends Error {}
 // A missing or malformed env var. Its message names the variable and holds no
 // secret, so it is safe to show to users.
 export class ContractConfigError extends ContractUnavailableError {}
+// Raised instead of broadcasting once a submission's deadline has passed.
+export class BroadcastDeadlineError extends Error {}
 
-// Cached across warm invocations; reset on failure so the next call retries.
-let contractPromise = null;
+export { RpcError };
 
-export function getProvider() {
+function getNodeUrl() {
   // No built-in default: public Sepolia endpoints keep disappearing, so the
   // deployment must name one it has checked (see `npm run check:rpc`).
   const nodeUrl = process.env.STARKNET_RPC_URL;
   if (!nodeUrl) {
     throw new ContractConfigError('STARKNET_RPC_URL environment variable is not set');
   }
-  return new RpcProvider({ nodeUrl });
+  return nodeUrl;
 }
 
-async function initializeContract() {
+export function getProvider(options = {}) {
+  return new RpcProvider({ nodeUrl: getNodeUrl(), ...options });
+}
+
+function getSignerConfig() {
   const privateKey = process.env.PRIVATE_KEY;
   if (!privateKey) {
     throw new ContractConfigError('PRIVATE_KEY environment variable is not set');
@@ -35,52 +40,66 @@ async function initializeContract() {
   if (!/^0x[0-9a-fA-F]{1,64}$/.test(accountAddress)) {
     throw new ContractConfigError('ACCOUNT_ADDRESS must be a 0x-prefixed hex address');
   }
-  const provider = getProvider();
-  const account = new Account({ provider, address: accountAddress, signer: privateKey });
-  let abi;
-  try {
-    ({ abi } = await provider.getClassAt(contractAddress));
-  } catch (error) {
-    throw new ContractUnavailableError(`Could not load contract from Starknet RPC: ${error.message}`);
-  }
-  if (!abi) {
-    throw new ContractUnavailableError('No ABI found for contract');
-  }
-  return new Contract({ abi, address: contractAddress, providerOrAccount: account });
+  return { privateKey, accountAddress };
 }
 
-export function getContract() {
-  if (!contractPromise) {
-    contractPromise = initializeContract().catch((error) => {
-      contractPromise = null;
-      console.error('Error initializing contract:', error);
+// The ABI is cached across warm invocations; reset on failure so the next call retries.
+let abiPromise = null;
+
+function getAbi() {
+  if (!abiPromise) {
+    abiPromise = (async () => {
+      let abi;
+      try {
+        ({ abi } = await getProvider().getClassAt(contractAddress));
+      } catch (error) {
+        throw new ContractUnavailableError(`Could not load contract from Starknet RPC: ${error.message}`);
+      }
+      if (!abi) throw new ContractUnavailableError('No ABI found for contract');
+      return abi;
+    })().catch((error) => {
+      abiPromise = null;
+      console.error('Error loading contract ABI:', error);
       throw error;
     });
   }
-  return contractPromise;
+  return abiPromise;
+}
+
+export async function getContract() {
+  return new Contract({ abi: await getAbi(), address: contractAddress, providerOrAccount: getProvider() });
 }
 
 export function hashText(text) {
   return hash.starknetKeccak(text).toString();
 }
 
-// Write functions return once the transaction is submitted; callers record it as
-// pending and resolve the outcome later with getTransactionOutcome, so API
-// routes don't wait for block inclusion inside a serverless time limit.
+// Signs and sends one contract write. Everything before the broadcast (ABI,
+// nonce, fee estimation, signing) may run until `deadline`; after that the
+// guarded fetch refuses to send starknet_addInvokeTransaction, so a caller
+// that gave up waiting can safely record the write as not sent.
+// hasBroadcast() tells whether the transaction may already have left.
+export function startInvoke(method, args, deadline) {
+  let broadcastStarted = false;
+  const guardedFetch = (url, init) => {
+    if (typeof init?.body === 'string' && init.body.includes('"starknet_addInvokeTransaction"')) {
+      if (Date.now() > deadline) {
+        return Promise.reject(new BroadcastDeadlineError('Deadline passed before broadcast'));
+      }
+      broadcastStarted = true;
+    }
+    return fetch(url, init);
+  };
 
-export async function createFile(path, contentHash) {
-  const contract = await getContract();
-  return contract.invoke('create_file', [path, contentHash]);
-}
+  const result = (async () => {
+    const { privateKey, accountAddress } = getSignerConfig();
+    const provider = getProvider({ baseFetch: guardedFetch });
+    const account = new Account({ provider, address: accountAddress, signer: privateKey });
+    const contract = new Contract({ abi: await getAbi(), address: contractAddress, providerOrAccount: account });
+    return contract.invoke(method, args);
+  })();
 
-export async function updateFile(path, prevContentHash, newContentHash) {
-  const contract = await getContract();
-  return contract.invoke('update', [path, prevContentHash, newContentHash]);
-}
-
-export async function removeFile(contentHash) {
-  const contract = await getContract();
-  return contract.invoke('remove', [contentHash]);
+  return { result, hasBroadcast: () => broadcastStarted };
 }
 
 export async function getFileCount() {

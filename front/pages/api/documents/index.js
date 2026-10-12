@@ -1,8 +1,8 @@
 import { getCollection } from '../../../src/lib/mongodb';
 import { methodNotAllowed, sendDatabaseError, sendError } from '../../../src/lib/api';
-import { requireWritePassword } from '../../../src/lib/auth';
+import { checkWriteRateLimit } from '../../../src/lib/writeLimit';
 import { submitChainWrite } from '../../../src/lib/chain';
-import { createFile, hashText } from '../../../src/lib/contract';
+import { hashText } from '../../../src/lib/contract';
 import { validateName } from '../../../src/lib/validation';
 
 export default async function handler(req, res) {
@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    if (!(await requireWritePassword(req, res))) return;
+    if (!(await checkWriteRateLimit(req, res))) return;
     const { text, name } = req.body || {};
     if (typeof text !== 'string' || !text) {
       return sendError(res, 400, 'text is required');
@@ -24,8 +24,9 @@ export default async function handler(req, res) {
     const hash = hashText(text);
     try {
       const collection = await getCollection();
-      const { insertedId } = await collection.insertOne({ text, name, hash, createdAt: new Date() });
-      const chain = await submitChainWrite('create', () => createFile(name, hash));
+      // onChainHash only changes once a transaction is confirmed.
+      const { insertedId } = await collection.insertOne({ text, name, hash, onChainHash: null, createdAt: new Date() });
+      const chain = await submitChainWrite('create', 'create_file', [name, hash], hash);
       await collection.updateOne({ _id: insertedId }, { $set: { chain } });
       return res.status(201).json({ id: insertedId, chain });
     } catch (error) {
