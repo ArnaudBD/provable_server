@@ -1,7 +1,7 @@
 import { ObjectId } from 'mongodb';
 import { getCollection } from '../../../src/lib/mongodb';
 import { methodNotAllowed, sendDatabaseError, sendError } from '../../../src/lib/api';
-import { requireWritePassword } from '../../../src/lib/auth';
+import { checkWriteRateLimit } from '../../../src/lib/writeLimit';
 import { submitChainWrite } from '../../../src/lib/chain';
 import { hashText, removeFile, updateFile } from '../../../src/lib/contract';
 import { validateName } from '../../../src/lib/validation';
@@ -21,7 +21,7 @@ export default async function handler(req, res) {
 
   let updateFields;
   if (req.method === 'PUT' || req.method === 'DELETE') {
-    if (!(await requireWritePassword(req, res))) return;
+    if (!(await checkWriteRateLimit(req, res))) return;
   }
   if (req.method === 'PUT') {
     const { text, name } = req.body || {};

@@ -1,6 +1,6 @@
 import { getCollection } from '../../../src/lib/mongodb';
 import { methodNotAllowed, sendDatabaseError, sendError } from '../../../src/lib/api';
-import { requireWritePassword } from '../../../src/lib/auth';
+import { checkWriteRateLimit } from '../../../src/lib/writeLimit';
 import { submitChainWrite } from '../../../src/lib/chain';
 import { createFile, hashText } from '../../../src/lib/contract';
 import { validateName } from '../../../src/lib/validation';
@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   }
 
   if (req.method === 'POST') {
-    if (!(await requireWritePassword(req, res))) return;
+    if (!(await checkWriteRateLimit(req, res))) return;
     const { text, name } = req.body || {};
     if (typeof text !== 'string' || !text) {
       return sendError(res, 400, 'text is required');

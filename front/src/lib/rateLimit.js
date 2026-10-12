@@ -29,14 +29,6 @@ export function getClientId(req) {
   return req.headers['x-real-ip'] || first || req.socket?.remoteAddress || 'unknown';
 }
 
-// Returns how many hits the client has used in the current window, without counting one.
-export async function peek(scope, clientId, windowMs) {
-  const { id, resetAt } = windowKey(scope, clientId, windowMs);
-  const collection = await getRateLimitCollection();
-  const doc = await collection.findOne({ _id: id });
-  return { count: doc?.count ?? 0, resetAt };
-}
-
 // Counts one hit and returns the new total for the current window.
 export async function hit(scope, clientId, windowMs) {
   const { id, resetAt } = windowKey(scope, clientId, windowMs);
