@@ -18,7 +18,8 @@ Project Settings > Environment Variables for Production and Preview.
 | `MONGODB_URI` | yes | MongoDB connection string. |
 | `MONGODB_DB` | no | Database name. Defaults to `myDatabase`, the database the original deployment used (documents live in its `myCollection` collection). |
 | `STARKNET_RPC_URL` | yes | Starknet Sepolia JSON-RPC endpoint speaking spec 0.9 or 0.10 (starknet.js 10). For Alchemy: `https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/v0_10/<api-key>`. |
-| `PRIVATE_KEY` | yes | Private key of the account that signs contract writes. Read server-side only; never expose it with a `NEXT_PUBLIC_` prefix. |
+| `ACCOUNT_ADDRESS` | yes | Address (`0x…`) of the deployed Starknet Sepolia account that signs contract writes. It pays the fees, so keep it funded with STRK. |
+| `PRIVATE_KEY` | yes | Private key of the `ACCOUNT_ADDRESS` account. Read server-side only; never expose it with a `NEXT_PUBLIC_` prefix. |
 | `WRITE_PASSWORD` | yes | Password the UI asks for before saving or deleting. Writes are disabled while it is unset. |
 
 Check an RPC endpoint (loads the contract and calls `get_file_count`, sends no transaction):

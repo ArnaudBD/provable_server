@@ -2,10 +2,12 @@
 // from API routes only, never from client components.
 import { RpcProvider, Contract, Account, hash } from 'starknet';
 
-const account0Address = '0x02e6721d8276a16dbfccf2416a2d5fecd40d8adaf6ef528d4aea24f63d3cc03b'; // make sure ur wallet has some eth from the faucet
 export const contractAddress = '0x04b306b10d8be501edc8ba8de2b318b103398b61b3c6aa6570cc891533088b72';
 
 export class ContractUnavailableError extends Error {}
+// A missing or malformed env var. Its message names the variable and holds no
+// secret, so it is safe to show to users.
+export class ContractConfigError extends ContractUnavailableError {}
 
 // Cached across warm invocations; reset on failure so the next call retries.
 let contractPromise = null;
@@ -15,7 +17,7 @@ export function getProvider() {
   // deployment must name one it has checked (see `npm run check:rpc`).
   const nodeUrl = process.env.STARKNET_RPC_URL;
   if (!nodeUrl) {
-    throw new ContractUnavailableError('STARKNET_RPC_URL environment variable is not set');
+    throw new ContractConfigError('STARKNET_RPC_URL environment variable is not set');
   }
   return new RpcProvider({ nodeUrl });
 }
@@ -23,10 +25,18 @@ export function getProvider() {
 async function initializeContract() {
   const privateKey = process.env.PRIVATE_KEY;
   if (!privateKey) {
-    throw new ContractUnavailableError('PRIVATE_KEY environment variable is not set');
+    throw new ContractConfigError('PRIVATE_KEY environment variable is not set');
+  }
+  // The deployed Starknet account that PRIVATE_KEY signs for; it pays the fees.
+  const accountAddress = process.env.ACCOUNT_ADDRESS;
+  if (!accountAddress) {
+    throw new ContractConfigError('ACCOUNT_ADDRESS environment variable is not set');
+  }
+  if (!/^0x[0-9a-fA-F]{1,64}$/.test(accountAddress)) {
+    throw new ContractConfigError('ACCOUNT_ADDRESS must be a 0x-prefixed hex address');
   }
   const provider = getProvider();
-  const account = new Account({ provider, address: account0Address, signer: privateKey });
+  const account = new Account({ provider, address: accountAddress, signer: privateKey });
   let abi;
   try {
     ({ abi } = await provider.getClassAt(contractAddress));

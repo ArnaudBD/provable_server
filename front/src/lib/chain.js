@@ -1,4 +1,4 @@
-import { ContractUnavailableError } from './contract';
+import { ContractConfigError, ContractUnavailableError } from './contract';
 
 // Keep a slow or hanging RPC well inside the serverless time limit.
 const SUBMIT_TIMEOUT_MS = 15000;
@@ -14,6 +14,7 @@ function withTimeout(promise, ms) {
 }
 
 function describeFailure(error) {
+  if (error instanceof ContractConfigError) return `Server misconfigured: ${error.message}`;
   if (error instanceof ContractUnavailableError) return 'Starknet contract unavailable';
   if (error instanceof SubmitTimeoutError) return 'Starknet RPC timed out';
   return 'Starknet transaction failed';
