@@ -1,27 +1,38 @@
-import { MongoClient } from 'mongodb';
-
-const uri = 'mongodb+srv://Cluster06164:UNbKi3xL6ZY@cluster0.4chl5sg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
-const client = new MongoClient(uri);
+// Server-side Starknet writes. The browser posts here instead of importing
+// src/lib/contract.js, so PRIVATE_KEY never leaves the server.
+import { ContractUnavailableError, createFile, removeFile, updateFile } from '../../src/lib/contract';
+import { methodNotAllowed, sendError } from '../../src/lib/api';
 
 export default async function handler(req, res) {
-  await client.connect();
-  const db = client.db('myDatabase');
-  const collection = db.collection('myCollection');
+  if (req.method !== 'POST') {
+    return methodNotAllowed(req, res, ['POST']);
+  }
 
-  if (req.method === 'POST') {
-    const { text, name, hash } = req.body;
-    if (!text || !name || !hash) {
-      return res.status(400).send('Text, Name, and Hash are required');
+  const { action, path, contentHash, prevContentHash } = req.body || {};
+  let submit;
+  if (action === 'create') {
+    if (!path || !contentHash) return sendError(res, 400, 'path and contentHash are required');
+    submit = () => createFile(path, contentHash);
+  } else if (action === 'update') {
+    if (!path || !prevContentHash || !contentHash) {
+      return sendError(res, 400, 'path, prevContentHash and contentHash are required');
     }
-    try {
-      const result = await collection.insertOne({ text, name, hash, createdAt: new Date() });
-      res.status(201).send(`Document inserted with ID: ${result.insertedId}`);
-    } catch (error) {
-      console.error('Error inserting document', error);
-      res.status(500).send('Internal Server Error');
-    }
+    submit = () => updateFile(path, prevContentHash, contentHash);
+  } else if (action === 'remove') {
+    if (!contentHash) return sendError(res, 400, 'contentHash is required');
+    submit = () => removeFile(contentHash);
   } else {
-    res.setHeader('Allow', ['POST']);
-    res.status(405).end(`Method ${req.method} Not Allowed`);
+    return sendError(res, 400, 'action must be one of create, update, remove');
+  }
+
+  try {
+    const result = await submit();
+    return res.status(200).json({ transactionHash: result.transaction_hash });
+  } catch (error) {
+    if (error instanceof ContractUnavailableError) {
+      return sendError(res, 503, 'Starknet contract unavailable');
+    }
+    console.error(`Error submitting ${action} transaction`, error);
+    return sendError(res, 502, 'Starknet transaction failed');
   }
 }

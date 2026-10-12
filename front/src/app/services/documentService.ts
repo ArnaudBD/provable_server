@@ -30,3 +30,19 @@ export const fetchDocumentDetails = async (id: string) => {
   if (!response.ok) throw new Error(`Failed to fetch document details: ${response.statusText}`);
   return response.json();
 };
+export type ChainAction =
+  | { action: "create"; path: string; contentHash: string }
+  | { action: "update"; path: string; prevContentHash: string; contentHash: string }
+  | { action: "remove"; contentHash: string };
+
+// Contract writes are signed server-side by /api/submit.
+export const submitToChain = async (payload: ChainAction): Promise<string> => {
+  const response = await fetch(`${API_BASE_URL}/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.error || `Failed to submit transaction: ${response.statusText}`);
+  return body.transactionHash;
+};

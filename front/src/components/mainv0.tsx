@@ -5,10 +5,9 @@ import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Textarea } from "@/components/ui/textarea";
 import { hash as starknetHash } from "starknet";
-import { createFile, updateFile, removeFile, getFileCount, getFile } from '../lib/contract';
 import AlertDialog from './AlertDialog';
 import Image from 'next/image';
-import { fetchDocuments, saveDocument, deleteDocument, fetchDocumentDetails } from '../app/services/documentService'
+import { fetchDocuments, saveDocument, deleteDocument, fetchDocumentDetails, submitToChain } from '../app/services/documentService'
 
 interface FileUploadProps {
   onFileRead: (fileContent: string, fileName: string) => void;
@@ -73,12 +72,12 @@ export function Mainv0() {
       const response = await saveDocument(currentDocId != "" ? currentDocId : undefined, { text, name, hash: textHash });
 
       if (response.ok) {
-        const res = currentDocId !== ''
-          ? await updateFile(name, prevHash!, textHash)
-          : await createFile(name, textHash);
+        const txHash = currentDocId !== ''
+          ? await submitToChain({ action: 'update', path: name, prevContentHash: prevHash!, contentHash: textHash })
+          : await submitToChain({ action: 'create', path: name, contentHash: textHash });
 
-        setAlertMessage(`File ${currentDocId !== '' ? 'updated' : 'created'}: ${JSON.stringify(res.transaction_hash)}`);
-        setTransactionHash(res.transaction_hash);
+        setAlertMessage(`File ${currentDocId !== '' ? 'updated' : 'created'}: ${JSON.stringify(txHash)}`);
+        setTransactionHash(txHash);
         fetchDocuments().then(setDocuments);
       } else {
         setAlertMessage(`Error: Failed to save text ${response.statusText}`);
@@ -102,9 +101,9 @@ export function Mainv0() {
       if (response.ok) {
         setDocuments((prevDocuments) => prevDocuments.filter((doc) => doc._id !== id));
         if (textHash) {
-          const res = await removeFile(textHash);
-          setAlertMessage(`File deleted: ${JSON.stringify(res.transaction_hash)}`);
-          setTransactionHash(res.transaction_hash);
+          const txHash = await submitToChain({ action: 'remove', contentHash: textHash });
+          setAlertMessage(`File deleted: ${JSON.stringify(txHash)}`);
+          setTransactionHash(txHash);
         }
       } else {
         setAlertMessage(`Error: Failed to delete document ${response.statusText}`);
