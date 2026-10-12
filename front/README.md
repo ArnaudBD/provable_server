@@ -36,6 +36,13 @@ npm run check:rpc
   `chain.status` is then `failed`, and the UI marks it "not on Starknet".
 - Successful submissions start as `pending`; `GET /api/transactions/:hash`
   resolves them to `confirmed` or `rejected`.
+- `onChainHash` is the hash the contract holds for a document. It only changes
+  when a transaction is confirmed, and the next update or removal is signed
+  against it. A write to a document whose previous transaction is still
+  pending returns `409`.
+- A submission that has not been broadcast after 15 s is abandoned and never
+  sent (`failed`). One that was sent but whose answer never came back is
+  recorded as `unknown`.
 
 ## Development
 

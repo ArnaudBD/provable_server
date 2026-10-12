@@ -2,7 +2,7 @@ const API_BASE_URL = '/api';
 
 export interface ChainRecord {
   action: 'create' | 'update' | 'remove';
-  status: 'pending' | 'confirmed' | 'rejected' | 'failed';
+  status: 'pending' | 'confirmed' | 'rejected' | 'failed' | 'unknown' | 'skipped';
   txHash?: string;
   error?: string;
 }

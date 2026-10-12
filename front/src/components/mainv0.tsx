@@ -25,6 +25,8 @@ const CHAIN_LABELS: Record<ChainRecord['status'], string> = {
   confirmed: 'on Starknet',
   rejected: 'rejected by Starknet',
   failed: 'not on Starknet',
+  unknown: 'Starknet status unknown',
+  skipped: 'never on Starknet',
 };
 
 function ChainBadge({ chain }: { chain?: ChainRecord }) {
@@ -84,6 +86,16 @@ export function Mainv0() {
   // Report a chain write as pending, then as confirmed or rejected once the
   // transaction's outcome is known.
   const reportChain = async (label: string, chain: ChainRecord) => {
+    if (chain.status === 'skipped') {
+      setTransactionHash('');
+      setAlertMessage(`${label}. It was never recorded on Starknet, so no transaction was needed.`);
+      return;
+    }
+    if (chain.status === 'unknown') {
+      setTransactionHash('');
+      setAlertMessage(`${label} in the database, but the Starknet RPC stopped answering after sending, so it is unknown whether the transaction went through.`);
+      return;
+    }
     if (chain.status === 'failed' || !chain.txHash) {
       setTransactionHash('');
       setAlertMessage(`${label} in the database, but the Starknet transaction was not sent: ${chain.error ?? 'unknown error'}`);
