@@ -11,13 +11,15 @@ function AlertDialog({ message, onClose, transactionHash }) {
             <div className="alert-dialog-content">
                 <p>{message}</p>
                 <button className="alert-dialog-close-button" onClick={onClose}>Close</button>
-                <button
-                    className="alert-dialog-link-button"
-                    onClick={() => window.open(transactionUrl, '_blank')}
-                    style={{ marginLeft: '10px' }}
-                >
-                    See Transaction
-                </button>
+                {transactionHash && (
+                    <button
+                        className="alert-dialog-link-button"
+                        onClick={() => window.open(transactionUrl, '_blank')}
+                        style={{ marginLeft: '10px' }}
+                    >
+                        See Transaction
+                    </button>
+                )}
             </div>
         </div>
     );

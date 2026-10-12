@@ -1,36 +1,47 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Provable Server front end
 
-## Getting Started
+Next.js app (pages API routes + app router UI) that stores documents in MongoDB
+and records each create, update and delete on a Starknet Sepolia contract.
 
-First, run the development server:
+## Requirements
+
+- Node.js 24 (`engines.node` is `24.x`; set the same version in the Vercel project).
+- A MongoDB database and a Starknet Sepolia RPC endpoint.
+
+## Environment variables
+
+Copy `.env.example` to `.env.local` for local work. On Vercel, set them under
+Project Settings > Environment Variables for Production and Preview.
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `MONGODB_URI` | yes | MongoDB connection string. |
+| `MONGODB_DB` | no | Database name. Defaults to `myDatabase`, the database the original deployment used (documents live in its `myCollection` collection). |
+| `STARKNET_RPC_URL` | yes | Starknet Sepolia JSON-RPC endpoint speaking spec 0.9 or 0.10 (starknet.js 10). For Alchemy: `https://starknet-sepolia.g.alchemy.com/starknet/version/rpc/v0_10/<api-key>`. |
+| `ACCOUNT_ADDRESS` | yes | Address (`0x…`) of the deployed Starknet Sepolia account that signs contract writes. It pays the fees, so keep it funded with STRK. |
+| `PRIVATE_KEY` | yes | Private key of the `ACCOUNT_ADDRESS` account. Read server-side only; never expose it with a `NEXT_PUBLIC_` prefix. |
+| `WRITE_PASSWORD` | yes | Password the UI asks for before saving or deleting. Writes are disabled while it is unset. |
+
+Check an RPC endpoint (loads the contract and calls `get_file_count`, sends no transaction):
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run check:rpc
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Behaviour
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- Writes (`POST /api/documents`, `PUT`/`DELETE /api/documents/:id`) need the
+  `x-write-password` header. Each client gets 5 wrong passwords per 15 minutes
+  and 30 writes per 10 minutes, then `429`.
+- A document is saved in MongoDB even when the Starknet write fails. Its
+  `chain.status` is then `failed`, and the UI marks it "not on Starknet".
+- Successful submissions start as `pending`; `GET /api/transactions/:hash`
+  resolves them to `confirmed` or `rejected`.
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+## Development
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+```bash
+npm install
+npm run dev     # http://localhost:3000
+npm run build
+```

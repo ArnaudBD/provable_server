@@ -1,37 +1,43 @@
-import { NextApiRequest, NextApiResponse } from 'next';
-
-const { MongoClient, ObjectId } = require('mongodb');
-const uri = 'mongodb+srv://Cluster06164:UNbKi3xL6ZY@cluster0.4chl5sg.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0';
-const client = new MongoClient(uri);
+import { getCollection } from '../../../src/lib/mongodb';
+import { methodNotAllowed, sendDatabaseError, sendError } from '../../../src/lib/api';
+import { requireWritePassword } from '../../../src/lib/auth';
+import { submitChainWrite } from '../../../src/lib/chain';
+import { createFile, hashText } from '../../../src/lib/contract';
+import { validateName } from '../../../src/lib/validation';
 
 export default async function handler(req, res) {
-  await client.connect();
-  console.log('Connected to MongoDB');
+  if (req.method !== 'GET' && req.method !== 'POST') {
+    return methodNotAllowed(req, res, ['GET', 'POST']);
+  }
 
-  const db = client.db('myDatabase');
-  const collection = db.collection('myCollection');
-
-  if (req.method === 'GET') {
-     
-        try {
-          const documents = await collection.find({}).toArray();
-          res.status(200).json(documents);
-        } catch (error) {
-          console.error('Error fetching documents', error);
-          res.status(500).send('Internal Server Error');
-        }
-  } else if (req.method === 'POST') {
-    const { text, name, hash } = req.body;
-    try {
-      console.log(text, name, hash)
-      const result = await collection.insertOne({ text, name, hash, createdAt: new Date() });
-      res.status(201).send(`Document inserted with ID: ${result.insertedId}`);
-    } catch (error) {
-      console.error('Error inserting document', error);
-      res.status(500).send('Internal Server Error');
+  if (req.method === 'POST') {
+    if (!(await requireWritePassword(req, res))) return;
+    const { text, name } = req.body || {};
+    if (typeof text !== 'string' || !text) {
+      return sendError(res, 400, 'text is required');
     }
-  } else {
-    res.setHeader('Allow', ['GET', 'POST']);
-    res.status(405).end(`Method ${req.method} Not Allowed`);
+    const nameError = validateName(name);
+    if (nameError) return sendError(res, 400, nameError);
+
+    // The hash is always derived here, so the signer only ever commits the
+    // hash of a document that is actually stored.
+    const hash = hashText(text);
+    try {
+      const collection = await getCollection();
+      const { insertedId } = await collection.insertOne({ text, name, hash, createdAt: new Date() });
+      const chain = await submitChainWrite('create', () => createFile(name, hash));
+      await collection.updateOne({ _id: insertedId }, { $set: { chain } });
+      return res.status(201).json({ id: insertedId, chain });
+    } catch (error) {
+      return sendDatabaseError(res, error, 'Error inserting document');
+    }
+  }
+
+  try {
+    const collection = await getCollection();
+    const documents = await collection.find({}).toArray();
+    return res.status(200).json(documents);
+  } catch (error) {
+    return sendDatabaseError(res, error, 'Error fetching documents');
   }
 }

@@ -4,11 +4,9 @@ import React, { useState, useEffect } from "react"; // Ensure React is imported
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { Textarea } from "@/components/ui/textarea";
-import { hash as starknetHash } from "starknet";
-import { createFile, updateFile, removeFile, getFileCount, getFile } from '../lib/contract';
 import AlertDialog from './AlertDialog';
 import Image from 'next/image';
-import { fetchDocuments, saveDocument, deleteDocument, fetchDocumentDetails } from '../app/services/documentService'
+import { fetchDocuments, saveDocument, deleteDocument, fetchDocumentDetails, waitForTransaction, ChainRecord } from '../app/services/documentService'
 
 interface FileUploadProps {
   onFileRead: (fileContent: string, fileName: string) => void;
@@ -19,6 +17,24 @@ interface Document {
   name: string;
   text: string;
   hash: string;
+  chain?: ChainRecord;
+}
+
+const CHAIN_LABELS: Record<ChainRecord['status'], string> = {
+  pending: 'pending on Starknet',
+  confirmed: 'on Starknet',
+  rejected: 'rejected by Starknet',
+  failed: 'not on Starknet',
+};
+
+function ChainBadge({ chain }: { chain?: ChainRecord }) {
+  if (!chain || chain.status === 'confirmed') return null;
+  const color = chain.status === 'pending' ? 'text-yellow-500' : 'text-red-500';
+  return (
+    <span className={`ml-2 shrink-0 text-xs ${color}`} title={chain.error ?? CHAIN_LABELS[chain.status]}>
+      {CHAIN_LABELS[chain.status]}
+    </span>
+  );
 }
 
 function FileUpload({ onFileRead }: FileUploadProps) {
@@ -65,58 +81,58 @@ export function Mainv0() {
       .catch(error => console.error("Error fetching documents:", error));
   }, []);
 
+  // Report a chain write as pending, then as confirmed or rejected once the
+  // transaction's outcome is known.
+  const reportChain = async (label: string, chain: ChainRecord) => {
+    if (chain.status === 'failed' || !chain.txHash) {
+      setTransactionHash('');
+      setAlertMessage(`${label} in the database, but the Starknet transaction was not sent: ${chain.error ?? 'unknown error'}`);
+      return;
+    }
+    const txHash = chain.txHash;
+    setTransactionHash(txHash);
+    setAlertMessage(`${label}. Starknet transaction submitted, waiting for confirmation: ${txHash}`);
+    const outcome = await waitForTransaction(txHash);
+    fetchDocuments().then(setDocuments).catch(() => {});
+    setTransactionHash(txHash);
+    if (outcome === 'confirmed') {
+      setAlertMessage(`${label}. Starknet transaction confirmed: ${txHash}`);
+    } else if (outcome === 'rejected') {
+      setAlertMessage(`${label} in the database, but the Starknet transaction was rejected: ${txHash}`);
+    } else {
+      setAlertMessage(`${label}. Starknet transaction still pending, check it on Voyager: ${txHash}`);
+    }
+  };
+
+  const showError = (error: unknown) => {
+    setTransactionHash('');
+    setAlertMessage(error instanceof Error ? `Error: ${error.message}` : 'An unknown error occurred');
+  };
+
   const handleSave = async () => {
     try {
-      const textHash = starknetHash.starknetKeccak(text).toString();
-      const prevHash = currentDocId !== '' ? documents.find(doc => doc._id === currentDocId)?.hash : null;
-
-      const response = await saveDocument(currentDocId != "" ? currentDocId : undefined, { text, name, hash: textHash });
-
-      if (response.ok) {
-        const res = currentDocId !== ''
-          ? await updateFile(name, prevHash!, textHash)
-          : await createFile(name, textHash);
-
-        setAlertMessage(`File ${currentDocId !== '' ? 'updated' : 'created'}: ${JSON.stringify(res.transaction_hash)}`);
-        setTransactionHash(res.transaction_hash);
-        fetchDocuments().then(setDocuments);
-      } else {
-        setAlertMessage(`Error: Failed to save text ${response.statusText}`);
-      }
+      const isUpdate = currentDocId !== '';
+      const result = await saveDocument(isUpdate ? currentDocId : undefined, { text, name });
+      if (!isUpdate && result.id) setCurrentDocId(result.id);
+      fetchDocuments().then(setDocuments).catch(showError);
+      await reportChain(`File ${isUpdate ? 'updated' : 'created'}`, result.chain);
     } catch (error) {
-      if (error instanceof Error) {
-        setAlertMessage(`Error: ${error.message}`);
-      } else {
-        setAlertMessage('An unknown error occurred');
-      }
+      showError(error);
     }
   };
 
   const handleDelete = async (id: string) => {
     try {
-      const docToDelete = documents.find((doc) => doc._id === id);
-      const textHash = docToDelete ? starknetHash.starknetKeccak(docToDelete.text).toString() : undefined;
-
-      const response = await deleteDocument(id);
-
-      if (response.ok) {
-        setDocuments((prevDocuments) => prevDocuments.filter((doc) => doc._id !== id));
-        if (textHash) {
-          const res = await removeFile(textHash);
-          setAlertMessage(`File deleted: ${JSON.stringify(res.transaction_hash)}`);
-          setTransactionHash(res.transaction_hash);
-        }
-      } else {
-        setAlertMessage(`Error: Failed to delete document ${response.statusText}`);
-      }
+      const result = await deleteDocument(id);
+      setDocuments((prevDocuments) => prevDocuments.filter((doc) => doc._id !== id));
+      if (id === currentDocId) setCurrentDocId('');
+      await reportChain('File deleted', result.chain);
     } catch (error) {
-      if (error instanceof Error) {
-        setAlertMessage(`Error: ${error.message}`);
-      } else {
-        setAlertMessage('An unknown error occurred');
-      }
+      showError(error);
     }
   };
+
+  const currentDoc = documents.find((doc) => doc._id === currentDocId);
 
   const handleDocumentClick = async (id: string) => {
     try {
@@ -172,6 +188,7 @@ export function Mainv0() {
                 >
                   {doc.name}
                 </a>
+                <ChainBadge chain={doc.chain} />
                 <XIcon
                   className="h-4 w-4 cursor-pointer"
                   onClick={(e) => {
@@ -202,6 +219,9 @@ export function Mainv0() {
           {currentDocId !== '' && (
             <div className="mt-2 text-sm text-gray-5000">
               Document ID: {currentDocId}
+              {currentDoc?.chain && (
+                <span className="ml-2">· {CHAIN_LABELS[currentDoc.chain.status]}{currentDoc.chain.error ? ` (${currentDoc.chain.error})` : ''}</span>
+              )}
             </div>
           )}
         </div>
